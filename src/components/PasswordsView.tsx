@@ -755,11 +755,11 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
     // Remember the code (wrapped with the device key) so fingerprint unlock
     // works on a fresh app start, and reset the biometric unlock counter.
     if (userId) {
-      try { await storeBioPin(userId, pin); } catch {}
       try { await storeBioPin(userId, pin); setBioSaved(true); } catch {}
       setBioCount(userId, 0);
       setBioLeft(BIO_UNLOCK_LIMIT);
     }
+
 
   };
 
