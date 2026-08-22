@@ -691,8 +691,12 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
       });
       if (error) throw error;
       setPinHash(hash); setPinSalt(saltHex); setDerivedKey(newKey);
+      // Refresh the fingerprint-unlock code stored on this device.
+      try { await storeBioPin(userId, changePin); setBioSaved(true); } catch {}
+      setBioCount(userId, 0); setBioLeft(BIO_UNLOCK_LIMIT);
       setChangeOpen(false); setCurrentPin(""); setChangePin(""); setChangePin2("");
       toast.success("Lock password changed");
+
     } catch (e) {
       toast.error("Couldn't change password", { description: e instanceof Error ? e.message : "" });
     } finally { setBusy(false); }
