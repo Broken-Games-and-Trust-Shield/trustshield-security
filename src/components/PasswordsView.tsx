@@ -346,6 +346,9 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
   const [unlocked, setUnlocked] = useState(false);
   const [unlockPin, setUnlockPin] = useState("");
   const [fingerprintReady, setFingerprintReady] = useState(false);
+  const [bioLeft, setBioLeft] = useState(BIO_UNLOCK_LIMIT);
+  const [bioSaved, setBioSaved] = useState(false);
+
   const [busy, setBusy] = useState(false);
   // Derived AES-GCM key from the PIN. Kept in memory only. When set, new
   // writes are encrypted before being sent to the database.
