@@ -223,6 +223,37 @@ function isEncrypted(v: string | null | undefined): boolean {
 
 const WEBAUTHN_LOCAL_KEY = (uid: string) => `trust-shield:webauthn:${uid}`;
 
+// ===== Fingerprint unlock across app restarts =====
+// After a successful code unlock we wrap the code with the per-device key and
+// keep it in localStorage, so a fingerprint check can restore the vault on a
+// fresh app start. The saved code is only usable for a limited number of
+// biometric unlocks before the real password is required again.
+const BIO_PIN_LS = (uid: string) => `trust-shield:vault-biopin:${uid}`;
+const BIO_COUNT_LS = (uid: string) => `trust-shield:vault-biocount:${uid}`;
+const BIO_UNLOCK_LIMIT = 10;
+
+function getBioCount(uid: string): number {
+  try { return parseInt(localStorage.getItem(BIO_COUNT_LS(uid)) || "0", 10) || 0; } catch { return 0; }
+}
+function setBioCount(uid: string, n: number) {
+  try { localStorage.setItem(BIO_COUNT_LS(uid), String(n)); } catch {}
+}
+async function storeBioPin(uid: string, pin: string) {
+  const key = await getOrCreateDeviceKey(uid);
+  const wrapped = await encryptField(key, pin);
+  try { localStorage.setItem(BIO_PIN_LS(uid), wrapped); } catch {}
+}
+async function loadBioPin(uid: string): Promise<string> {
+  let wrapped = "";
+  try { wrapped = localStorage.getItem(BIO_PIN_LS(uid)) || ""; } catch {}
+  if (!wrapped) return "";
+  try {
+    const key = await getOrCreateDeviceKey(uid);
+    return await decryptField(key, wrapped);
+  } catch { return ""; }
+}
+
+
 function isWebAuthnSupported() {
   return typeof window !== "undefined" && "PublicKeyCredential" in window;
 }
