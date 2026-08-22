@@ -466,7 +466,10 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
       try {
         const local = localStorage.getItem(WEBAUTHN_LOCAL_KEY(userId));
         setFingerprintReady(!!local && isWebAuthnSupported());
+        setBioSaved(!!localStorage.getItem(BIO_PIN_LS(userId)));
+        setBioLeft(Math.max(0, BIO_UNLOCK_LIMIT - getBioCount(userId)));
       } catch {}
+
 
       setLoading(false);
     }
