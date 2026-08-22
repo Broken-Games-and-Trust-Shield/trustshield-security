@@ -656,8 +656,9 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
         user_id: userId, lock_enabled: false, pin_hash: null, pin_salt: null,
       });
       if (error) throw error;
-      try { localStorage.removeItem(WEBAUTHN_LOCAL_KEY(userId)); } catch {}
-      setLockEnabled(false); setPinHash(null); setPinSalt(null); setUnlocked(true); setFingerprintReady(false);
+      try { localStorage.removeItem(WEBAUTHN_LOCAL_KEY(userId)); localStorage.removeItem(BIO_PIN_LS(userId)); localStorage.removeItem(BIO_COUNT_LS(userId)); } catch {}
+      setLockEnabled(false); setPinHash(null); setPinSalt(null); setUnlocked(true); setFingerprintReady(false); setBioSaved(false);
+
       setDerivedKey(devKey);
       toast.success("Vault lock removed");
     } catch (e) {
