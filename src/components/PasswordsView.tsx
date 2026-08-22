@@ -980,10 +980,25 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
               <Button onClick={tryUnlockPin}>Unlock</Button>
             </div>
             {fingerprintReady && (
-              <Button variant="outline" onClick={tryUnlockFingerprint} className="gap-2">
-                <Fingerprint className="h-4 w-4" /> Use fingerprint
-              </Button>
+              <div className="space-y-1">
+                <Button
+                  variant="outline"
+                  onClick={tryUnlockFingerprint}
+                  className="gap-2"
+                  disabled={!bioSaved || bioLeft <= 0}
+                >
+                  <Fingerprint className="h-4 w-4" /> Use fingerprint
+                </Button>
+                <div className="text-[11px] text-muted-foreground">
+                  {!bioSaved
+                    ? "Enter your password once on this device to enable fingerprint unlock."
+                    : bioLeft <= 0
+                      ? `Password required — you've used all ${BIO_UNLOCK_LIMIT} fingerprint unlocks.`
+                      : `${bioLeft} of ${BIO_UNLOCK_LIMIT} fingerprint unlocks left before your password is required.`}
+                </div>
+              </div>
             )}
+
           </div>
         ) : (
         <>
