@@ -223,6 +223,37 @@ function isEncrypted(v: string | null | undefined): boolean {
 
 const WEBAUTHN_LOCAL_KEY = (uid: string) => `trust-shield:webauthn:${uid}`;
 
+// ===== Fingerprint unlock across app restarts =====
+// After a successful code unlock we wrap the code with the per-device key and
+// keep it in localStorage, so a fingerprint check can restore the vault on a
+// fresh app start. The saved code is only usable for a limited number of
+// biometric unlocks before the real password is required again.
+const BIO_PIN_LS = (uid: string) => `trust-shield:vault-biopin:${uid}`;
+const BIO_COUNT_LS = (uid: string) => `trust-shield:vault-biocount:${uid}`;
+const BIO_UNLOCK_LIMIT = 10;
+
+function getBioCount(uid: string): number {
+  try { return parseInt(localStorage.getItem(BIO_COUNT_LS(uid)) || "0", 10) || 0; } catch { return 0; }
+}
+function setBioCount(uid: string, n: number) {
+  try { localStorage.setItem(BIO_COUNT_LS(uid), String(n)); } catch {}
+}
+async function storeBioPin(uid: string, pin: string) {
+  const key = await getOrCreateDeviceKey(uid);
+  const wrapped = await encryptField(key, pin);
+  try { localStorage.setItem(BIO_PIN_LS(uid), wrapped); } catch {}
+}
+async function loadBioPin(uid: string): Promise<string> {
+  let wrapped = "";
+  try { wrapped = localStorage.getItem(BIO_PIN_LS(uid)) || ""; } catch {}
+  if (!wrapped) return "";
+  try {
+    const key = await getOrCreateDeviceKey(uid);
+    return await decryptField(key, wrapped);
+  } catch { return ""; }
+}
+
+
 function isWebAuthnSupported() {
   return typeof window !== "undefined" && "PublicKeyCredential" in window;
 }
@@ -315,6 +346,9 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
   const [unlocked, setUnlocked] = useState(false);
   const [unlockPin, setUnlockPin] = useState("");
   const [fingerprintReady, setFingerprintReady] = useState(false);
+  const [bioLeft, setBioLeft] = useState(BIO_UNLOCK_LIMIT);
+  const [bioSaved, setBioSaved] = useState(false);
+
   const [busy, setBusy] = useState(false);
   // Derived AES-GCM key from the PIN. Kept in memory only. When set, new
   // writes are encrypted before being sent to the database.
@@ -432,7 +466,10 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
       try {
         const local = localStorage.getItem(WEBAUTHN_LOCAL_KEY(userId));
         setFingerprintReady(!!local && isWebAuthnSupported());
+        setBioSaved(!!localStorage.getItem(BIO_PIN_LS(userId)));
+        setBioLeft(Math.max(0, BIO_UNLOCK_LIMIT - getBioCount(userId)));
       } catch {}
+
 
       setLoading(false);
     }
@@ -619,8 +656,9 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
         user_id: userId, lock_enabled: false, pin_hash: null, pin_salt: null,
       });
       if (error) throw error;
-      try { localStorage.removeItem(WEBAUTHN_LOCAL_KEY(userId)); } catch {}
-      setLockEnabled(false); setPinHash(null); setPinSalt(null); setUnlocked(true); setFingerprintReady(false);
+      try { localStorage.removeItem(WEBAUTHN_LOCAL_KEY(userId)); localStorage.removeItem(BIO_PIN_LS(userId)); localStorage.removeItem(BIO_COUNT_LS(userId)); } catch {}
+      setLockEnabled(false); setPinHash(null); setPinSalt(null); setUnlocked(true); setFingerprintReady(false); setBioSaved(false);
+
       setDerivedKey(devKey);
       toast.success("Vault lock removed");
     } catch (e) {
@@ -653,33 +691,35 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
       });
       if (error) throw error;
       setPinHash(hash); setPinSalt(saltHex); setDerivedKey(newKey);
+      // Refresh the fingerprint-unlock code stored on this device.
+      try { await storeBioPin(userId, changePin); setBioSaved(true); } catch {}
+      setBioCount(userId, 0); setBioLeft(BIO_UNLOCK_LIMIT);
       setChangeOpen(false); setCurrentPin(""); setChangePin(""); setChangePin2("");
       toast.success("Lock password changed");
+
     } catch (e) {
       toast.error("Couldn't change password", { description: e instanceof Error ? e.message : "" });
     } finally { setBusy(false); }
   };
 
-  const tryUnlockPin = async () => {
-    if (!unlockPin) { toast.error("Enter your vault password"); return; }
-    // The server re-hashes and verifies the PIN, then returns entries. We
-    // rely on the server response (not a local hash check) so the unlock
-    // works even if the client couldn't read pin_hash for any reason.
+  // Unlocks the vault with a plaintext code. Shared by the manual code entry
+  // and the fingerprint path (which recovers the code from device storage).
+  const unlockWithPin = async (pin: string): Promise<boolean> => {
     try {
       const { data, error } = await supabase.functions.invoke("vault-fetch", {
-        body: { pin: unlockPin },
+        body: { pin },
       });
       if (error) {
         const msg = (error as { message?: string })?.message || "";
         if (/invalid_pin|401/i.test(msg)) toast.error("Wrong code");
         else toast.error("Couldn't unlock vault", { description: msg });
-        return;
+        return false;
       }
       if (!data || (data as { error?: string }).error) {
         const err = (data as { error?: string })?.error;
         if (err === "invalid_pin" || err === "pin_required") toast.error("Wrong code");
         else toast.error("Couldn't unlock vault", { description: err });
-        return;
+        return false;
       }
       const rows = ((data as { entries?: unknown[] }).entries ?? []) as any[];
       let list: VaultEntry[] = rows.map((r) => ({
@@ -690,7 +730,7 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
       let key: CryptoKey | null = null;
       if (pinSalt) {
         try {
-          key = await deriveVaultKey(unlockPin, pinSalt);
+          key = await deriveVaultKey(pin, pinSalt);
           list = await Promise.all(list.map((e) => decryptEntry(key!, e)));
         } catch {}
       }
@@ -698,26 +738,60 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
       setEntries(list);
       updateSummary(list);
       setUnlocked(true);
-      setUnlockPin("");
       toast.success("Vault unlocked");
+      return true;
     } catch (e) {
       toast.error("Couldn't unlock vault", { description: e instanceof Error ? e.message : "" });
+      return false;
     }
+  };
+
+  const tryUnlockPin = async () => {
+    if (!unlockPin) { toast.error("Enter your vault password"); return; }
+    const pin = unlockPin;
+    const ok = await unlockWithPin(pin);
+    if (!ok) return;
+    setUnlockPin("");
+    // Remember the code (wrapped with the device key) so fingerprint unlock
+    // works on a fresh app start, and reset the biometric unlock counter.
+    if (userId) {
+      try { await storeBioPin(userId, pin); setBioSaved(true); } catch {}
+      setBioCount(userId, 0);
+      setBioLeft(BIO_UNLOCK_LIMIT);
+    }
+
+
   };
 
   const tryUnlockFingerprint = async () => {
     if (!userId) return;
     const credId = localStorage.getItem(WEBAUTHN_LOCAL_KEY(userId));
     if (!credId) { toast.error("No fingerprint enrolled on this device"); return; }
-    const ok = await verifyFingerprintCredential(credId);
-    if (!ok) { toast.error("Fingerprint check failed"); return; }
-    if (entries.length === 0) {
-      toast.message("Enter your vault password once to load your saved logins on this device.");
+    if (getBioCount(userId) >= BIO_UNLOCK_LIMIT) {
+      toast.error("Password required", {
+        description: `Enter your vault password — it's required every ${BIO_UNLOCK_LIMIT} fingerprint unlocks.`,
+      });
       return;
     }
-    setUnlocked(true);
-    toast.success("Vault unlocked");
+    const wrapped = (() => { try { return localStorage.getItem(BIO_PIN_LS(userId)); } catch { return null; } })();
+    if (!wrapped) {
+      toast.message("Enter your vault password once on this device to enable fingerprint unlock.");
+      return;
+    }
+    const ok = await verifyFingerprintCredential(credId);
+    if (!ok) { toast.error("Fingerprint check failed"); return; }
+    const pin = await loadBioPin(userId);
+    if (!pin) {
+      toast.error("Couldn't recover your saved code", { description: "Enter your vault password once to re-enable fingerprint unlock." });
+      return;
+    }
+    const done = await unlockWithPin(pin);
+    if (!done) return;
+    const next = getBioCount(userId) + 1;
+    setBioCount(userId, next);
+    setBioLeft(Math.max(0, BIO_UNLOCK_LIMIT - next));
   };
+
 
   const enrollFingerprintNow = async () => {
     if (!userId) return;
@@ -912,10 +986,25 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
               <Button onClick={tryUnlockPin}>Unlock</Button>
             </div>
             {fingerprintReady && (
-              <Button variant="outline" onClick={tryUnlockFingerprint} className="gap-2">
-                <Fingerprint className="h-4 w-4" /> Use fingerprint
-              </Button>
+              <div className="space-y-1">
+                <Button
+                  variant="outline"
+                  onClick={tryUnlockFingerprint}
+                  className="gap-2"
+                  disabled={!bioSaved || bioLeft <= 0}
+                >
+                  <Fingerprint className="h-4 w-4" /> Use fingerprint
+                </Button>
+                <div className="text-[11px] text-muted-foreground">
+                  {!bioSaved
+                    ? "Enter your password once on this device to enable fingerprint unlock."
+                    : bioLeft <= 0
+                      ? `Password required — you've used all ${BIO_UNLOCK_LIMIT} fingerprint unlocks.`
+                      : `${bioLeft} of ${BIO_UNLOCK_LIMIT} fingerprint unlocks left before your password is required.`}
+                </div>
+              </div>
             )}
+
           </div>
         ) : (
         <>

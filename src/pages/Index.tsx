@@ -91,6 +91,15 @@ type UpdateNote = { id: string; version: string; name: string; date: string; sum
 
 const UPDATES: UpdateNote[] = [
   {
+    id: "2.1.1",
+    version: "2.1.1",
+    name: "Fingerprint unlock after restart",
+    date: "2026-08-22",
+    summary:
+      "You can now unlock the password vault with your fingerprint even after fully closing and reopening Trust Shield — your unlock code is wrapped with this device's key so biometrics can restore the vault on a fresh start. For safety, every 10 fingerprint unlocks you must enter your vault password again, and the unlock screen shows how many fingerprint unlocks are left.",
+  },
+  {
+
     id: "2.1.0",
     version: "2.1.0",
     name: "Cyber Guardian remembers your chats",
