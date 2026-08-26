@@ -91,6 +91,14 @@ type UpdateNote = { id: string; version: string; name: string; date: string; sum
 
 const UPDATES: UpdateNote[] = [
   {
+    id: "2.1.2",
+    version: "2.1.2",
+    name: "Full password shown in vault",
+    date: "2026-08-26",
+    summary:
+      "Long passwords in the vault no longer get cut off with '…' when you press Show — the full password now wraps onto multiple lines so you can read every character.",
+  },
+  {
     id: "2.1.1",
     version: "2.1.1",
     name: "Fingerprint unlock after restart",
