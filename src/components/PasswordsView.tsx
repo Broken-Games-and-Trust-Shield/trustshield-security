@@ -1051,10 +1051,11 @@ export default function PasswordsView({ userId, onAskGuardian }: { userId: strin
                     </div>
                     {e.username && <div className="text-xs text-muted-foreground truncate">{e.username}</div>}
                     {e.url && <div className="text-xs text-muted-foreground truncate">{e.url}</div>}
-                    <div className="mt-1 flex items-center gap-2">
-                      <code className="text-xs bg-muted/50 px-2 py-1 rounded font-mono truncate max-w-[24ch]">
+                    <div className="mt-1 flex items-start gap-2 flex-wrap">
+                      <code className={`text-xs bg-muted/50 px-2 py-1 rounded font-mono ${isShown ? "break-all whitespace-pre-wrap max-w-full" : "truncate max-w-[24ch]"}`}>
                         {isShown ? e.password : "•".repeat(Math.min(e.password.length, 12))}
                       </code>
+
                       <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setReveal({ ...reveal, [e.id]: !isShown })}>
                         {isShown ? "Hide" : "Show"}
                       </button>
